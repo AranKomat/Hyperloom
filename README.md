@@ -48,7 +48,7 @@ Hyperloom combines:
 | Platform | MI300X, MI325X, MI355X |
 | Framework | SGLang, vLLM |
 | Kernel Language | HIP, Triton, FlyDSL |
-| LLM Backend | Claude |
+| LLM Backend | Claude; Codex for GEAK role agents |
 
 ## Get Started
 
@@ -121,7 +121,7 @@ the terms of the MIT license, provided the copyright notice and the
 permission notice are retained in all copies or substantial portions of
 the software.
 
-Third-party tools and agents (Cursor, Visual Studio, and Claude Code)
+Third-party tools and agents (Cursor, Visual Studio, Claude Code, and OpenAI Codex)
 that Hyperloom invokes are governed by their own separate license terms
 and are NOT covered by the MIT license above — see the "Third-Party
 Tools and Agents" section in [`LICENSE`](LICENSE). You are responsible
@@ -129,4 +129,3 @@ for reviewing and complying with each tool's individual license.
 
 For security-relevant issues, see [`SECURITY.md`](SECURITY.md). For
 contribution conventions, see [`CONTRIBUTING.md`](CONTRIBUTING.md).
-
