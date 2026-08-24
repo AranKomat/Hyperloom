@@ -3510,8 +3510,10 @@ def make_proposal(verification: dict[str, Any]) -> dict[str, Any]:
             return {
                 "decision": "KEEP",
                 "reasons": [
-                    "framework apply-back reference-verified; framework E2E/accuracy "
-                    "deferred to integrate"
+                    (
+                        "framework apply-back reference-verified; framework E2E/accuracy "
+                        "deferred to integrate"
+                    )
                 ],
             }
         return {
