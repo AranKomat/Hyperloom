@@ -22,7 +22,7 @@ SOFTWARE.
 
 ## Third-Party Tools and Agents
 
-Hyperloom uses the Cursor, Visual Studio, and Claude Code agents. These tools
-are governed by their own separate license terms and are not covered by the
-MIT license above. Users are responsible for reviewing and complying with the
-individual licenses for each of those tools.
+Hyperloom uses the Cursor, Visual Studio, Claude Code, and OpenAI Codex agents.
+These tools are governed by their own separate license terms and are not
+covered by the MIT license above. Users are responsible for reviewing and
+complying with the individual licenses for each of those tools.
