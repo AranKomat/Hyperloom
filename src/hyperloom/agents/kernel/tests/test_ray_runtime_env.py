@@ -1,11 +1,11 @@
 # SPDX-FileCopyrightText: 2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-"""Unit tests for ``backends/ray_runtime.py`` ``safe_runtime_env`` key/URL derivation.
+"""Unit tests for ``backends/ray_runtime.py`` ``safe_runtime_env`` forwarding.
 
 Locks the per-side alias derivation: each side's aliases come from that side's
-own credentials, and the GEAK aliases are never derived at all (GEAK runs on the
-Anthropic side via GEAK_CLAUDE_MODEL + ANTHROPIC_*).
+own credentials, GEAK aliases are never derived, and both GEAK agent-provider
+runtimes retain their non-secret settings across the Ray boundary.
 """
 
 from __future__ import annotations
@@ -38,7 +38,27 @@ _HEADER_VARS = ("ANTHROPIC_CUSTOM_HEADERS", "OPENAI_CUSTOM_HEADERS")
 
 
 def _clear(monkeypatch):
-    for name in (*_ALL_KEY_VARS, *_ALL_URL_VARS, *_HEADER_VARS):
+    for name in (
+        *_ALL_KEY_VARS,
+        *_ALL_URL_VARS,
+        *_HEADER_VARS,
+        "CODEX_HOME",
+        "GEAK_AGENT_PROVIDER",
+        "GEAK_NODE_BIN",
+        "GEAK_CODEX_BIN",
+        "GEAK_CODEX_MODEL",
+        "GEAK_CODEX_EFFORT",
+        "GEAK_CODEX_MAX_CONCURRENCY",
+        "GEAK_CODEX_AGENT_TIMEOUT_S",
+        "GEAK_CODEX_MAX_OUTPUT_BYTES",
+        "GEAK_CODEX_MAX_WORKFLOW_DEPTH",
+        "GEAK_CODEX_KILL_GRACE_MS",
+        "GEAK_CODEX_SANDBOX",
+        "GEAK_CODEX_NETWORK_ACCESS",
+        "GEAK_CODEX_ADD_DIRS",
+        "GEAK_CODEX_BYPASS_SANDBOX",
+        "GEAK_CODEX_EXTERNAL_SANDBOX",
+    ):
         monkeypatch.delenv(name, raising=False)
 
 
@@ -153,3 +173,33 @@ def test_gateway_custom_headers_reach_the_worker(monkeypatch):
 
     assert env["ANTHROPIC_CUSTOM_HEADERS"] == "Ocp-Apim-Subscription-Key: anthropic-key"
     assert env["OPENAI_CUSTOM_HEADERS"] == "X-Tenant: acme"
+
+
+def test_geak_codex_runtime_settings_and_normal_profile_reach_worker(monkeypatch):
+    """The GEAK Codex mode is configuration-only at this boundary.
+
+    ``CODEX_HOME`` is forwarded only when the operator supplied it; no API key
+    is invented and no run-private profile path is generated.
+    """
+    _clear(monkeypatch)
+    expected = {
+        "GEAK_AGENT_PROVIDER": "codex",
+        "GEAK_NODE_BIN": "/opt/node/bin/node",
+        "GEAK_CODEX_BIN": "/opt/codex/bin/codex",
+        "GEAK_CODEX_MODEL": "gpt-test",
+        "GEAK_CODEX_EFFORT": "high",
+        "GEAK_CODEX_MAX_CONCURRENCY": "4",
+        "GEAK_CODEX_SANDBOX": "workspace-write",
+        "GEAK_CODEX_NETWORK_ACCESS": "1",
+        "GEAK_CODEX_ADD_DIRS": '["/workspace/session"]',
+        "GEAK_CODEX_EXTERNAL_SANDBOX": "1",
+        "CODEX_HOME": "/home/operator/.codex",
+    }
+    for key, value in expected.items():
+        monkeypatch.setenv(key, value)
+
+    env = ray_runtime.safe_runtime_env()["env_vars"]
+
+    for key, value in expected.items():
+        assert env[key] == value
+    assert "OPENAI_API_KEY" not in env

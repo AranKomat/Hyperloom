@@ -23,6 +23,9 @@ In docker mode:
 - Pass `--install-framework none --yes` in the container (ROCm/framework comes from
   the image). Do **not** use `--skip-base-check` — let Phase 1 preflight validate
   the container environment.
+- Read `GEAK_AGENT_PROVIDER` and optional `CODEX_HOME` from `.env` without
+  printing secrets. When the provider is `codex`, export those two non-secret
+  values before constructing the Docker command below.
 - Do not run `python -m hyperloom.inference_optimizer.cli optimize` on the host.
 
 Suggested Docker images:
@@ -36,6 +39,29 @@ In Docker mode, start a long-running container on `HYPERLOOM_DOCKER_TARGET_HOST`
 
 ```bash
 export REPO_ROOT="$(pwd -P)"
+GEAK_CODEX_DOCKER_ARGS=()
+if [ "${GEAK_AGENT_PROVIDER:-claude}" = "codex" ]; then
+  GEAK_CODEX_PROFILE="${CODEX_HOME:-$HOME/.codex}"
+  [ -d "$GEAK_CODEX_PROFILE" ] || {
+    echo "Codex profile not found at $GEAK_CODEX_PROFILE; run codex login first" >&2
+    exit 2
+  }
+  GEAK_CODEX_PROFILE="$(cd "$GEAK_CODEX_PROFILE" && pwd -P)"
+  GEAK_CODEX_HOST_HOME="$(cd "$HOME" && pwd -P)"
+  GEAK_CODEX_TEMP_ROOT="${TMPDIR:-/tmp}"
+  GEAK_CODEX_TEMP_ROOT="$(cd "$GEAK_CODEX_TEMP_ROOT" && pwd -P)"
+  case "$GEAK_CODEX_PROFILE" in
+    /|"$GEAK_CODEX_HOST_HOME"|"$GEAK_CODEX_TEMP_ROOT"|"$REPO_ROOT")
+      echo "CODEX_HOME must be a scoped profile directory, not a broad host root" >&2; exit 2 ;;
+  esac
+  case "$GEAK_CODEX_PROFILE/" in
+    "$REPO_ROOT/"*) echo "CODEX_HOME must not be inside the Hyperloom workspace" >&2; exit 2 ;;
+  esac
+  GEAK_CODEX_DOCKER_ARGS=(
+    -e "CODEX_HOME=$GEAK_CODEX_PROFILE"
+    --mount "type=bind,src=$GEAK_CODEX_PROFILE,dst=$GEAK_CODEX_PROFILE"
+  )
+fi
 docker run -d \
   --name "${HYPERLOOM_CONTAINER_NAME:-hyperloom-local}" \
   --shm-size "${HYPERLOOM_SHM_SIZE:-64g}" \
@@ -44,11 +70,20 @@ docker run -d \
   --device /dev/dri \
   --group-add video \
   -v "$REPO_ROOT:$REPO_ROOT" \
+  "${GEAK_CODEX_DOCKER_ARGS[@]}" \
   "$HYPERLOOM_IMAGE" \
   -f /dev/null
 ```
 
 Mount the Hyperloom workspace at the same absolute path (`-v "$REPO_ROOT:$REPO_ROOT"`) so paths in `.env`, logs, and session artifacts stay valid. If `USER_DATA_PATH` or a pre-downloaded model directory is outside the workspace, add matching `-v host_path:host_path` mounts before starting the container.
+
+For GEAK Codex mode, the conditional arguments mount the user's existing normal
+Codex profile at the same absolute path; they never create a profile in the
+workspace. If in-container setup reports that ChatGPT login is unavailable
+(for example, host credentials live only in an OS keyring), run
+`docker exec -it "${HYPERLOOM_CONTAINER_NAME:-hyperloom-local}" codex login --device-auth` and
+rerun setup. Confirm `codex login status` reports exactly `Logged in using
+ChatGPT` inside the container before optimize.
 
 Then run the setup backend inside the container:
 

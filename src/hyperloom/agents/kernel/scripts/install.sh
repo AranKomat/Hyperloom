@@ -257,7 +257,13 @@ DOTENV="${REPO_ROOT}/.env"
 _DOTENV_PROTECTED_VARS='REPO_ROOT KERNEL_AGENT_ROOT HYPERLOOM_KERNEL_AGENT_ROOT
 USER_DATA_PATH HYPERLOOM_RUNTIME_DIR KERNEL_AGENT_ENV HYPERLOOM_ROOT
 MAGPIE_PATH INFERENCEX_PATH TRACELENS_ROOT TRACELENS_INTERNAL_ROOT
-GEAK_ROOT GEAK_E2E_RUNNER PYTHONPATH'
+GEAK_ROOT GEAK_E2E_RUNNER GEAK_AGENT_PROVIDER GEAK_NODE_BIN
+GEAK_CODEX_BIN GEAK_CODEX_MODEL GEAK_CODEX_EFFORT
+GEAK_CODEX_MAX_CONCURRENCY GEAK_CODEX_AGENT_TIMEOUT_S
+GEAK_CODEX_MAX_OUTPUT_BYTES GEAK_CODEX_MAX_WORKFLOW_DEPTH
+GEAK_CODEX_KILL_GRACE_MS GEAK_CODEX_SANDBOX GEAK_CODEX_NETWORK_ACCESS
+GEAK_CODEX_ADD_DIRS
+GEAK_CODEX_BYPASS_SANDBOX GEAK_CODEX_EXTERNAL_SANDBOX CODEX_HOME PYTHONPATH'
 
 if [ -z "${ANTHROPIC_BASE_URL:-}" ] || [ -z "${ANTHROPIC_API_KEY:-}" ] \
    || [ -z "${ANTHROPIC_AUTH_TOKEN:-}" ] || [ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
@@ -327,6 +333,34 @@ if [ -z "${GEAK_ROOT:-}" ]; then
   GEAK_ROOT="${_open_source_root}/GEAK@${_GEAK_SHA}"
 fi
 GEAK_E2E_RUNNER="${GEAK_E2E_RUNNER:-${GEAK_ROOT}/interface/run_e2e.py}"
+if [ "${GEAK_AGENT_PROVIDER+x}" = "x" ]; then
+  GEAK_AGENT_PROVIDER_VAL="$GEAK_AGENT_PROVIDER"
+else
+  GEAK_AGENT_PROVIDER_VAL="claude"
+fi
+# Match GEAK's own provider parsing: trim surrounding whitespace, normalize
+# case, and reject an explicitly empty value rather than silently selecting.
+GEAK_AGENT_PROVIDER_VAL="${GEAK_AGENT_PROVIDER_VAL#"${GEAK_AGENT_PROVIDER_VAL%%[![:space:]]*}"}"
+GEAK_AGENT_PROVIDER_VAL="${GEAK_AGENT_PROVIDER_VAL%"${GEAK_AGENT_PROVIDER_VAL##*[![:space:]]}"}"
+GEAK_AGENT_PROVIDER_VAL="$(printf '%s' "$GEAK_AGENT_PROVIDER_VAL" | tr '[:upper:]' '[:lower:]')"
+case "$GEAK_AGENT_PROVIDER_VAL" in
+  claude|codex) ;;
+  *)
+    echo "[kernel-agent ERROR] GEAK_AGENT_PROVIDER must be 'claude' or 'codex'; got '${GEAK_AGENT_PROVIDER:-}'" >&2
+    exit 1
+    ;;
+esac
+export GEAK_AGENT_PROVIDER="$GEAK_AGENT_PROVIDER_VAL"
+# Non-secret settings understood by GEAK's Codex compatibility runtime. Keep
+# this list aligned with interface/codex_workflow_runtime.mjs. CODEX_HOME is
+# intentionally separate: it is inherited only when the operator explicitly
+# set it; otherwise Codex uses its normal ~/.codex profile.
+_GEAK_CODEX_RUNTIME_ENV_VARS='GEAK_NODE_BIN GEAK_CODEX_BIN GEAK_CODEX_MODEL
+GEAK_CODEX_EFFORT GEAK_CODEX_MAX_CONCURRENCY GEAK_CODEX_AGENT_TIMEOUT_S
+GEAK_CODEX_MAX_OUTPUT_BYTES GEAK_CODEX_MAX_WORKFLOW_DEPTH
+GEAK_CODEX_KILL_GRACE_MS GEAK_CODEX_SANDBOX GEAK_CODEX_NETWORK_ACCESS
+GEAK_CODEX_ADD_DIRS
+GEAK_CODEX_BYPASS_SANDBOX GEAK_CODEX_EXTERNAL_SANDBOX'
 GEAK_CLAUDE_MODEL_VAL="${GEAK_CLAUDE_MODEL:-${CLAUDE_MODEL:-claude-opus-5}}"
 # Run mode for the GEAKv4 Claude Code workflow. ``full`` (default) selects the
 # 2 h / 5-round preset; ``quick`` selects the 1 h / 2-round smoke-test preset.
@@ -1135,6 +1169,10 @@ write_env_file() {
   local _anthropic_url="${_ANTHROPIC_BASE_URL_VAL:-}"
   local _anthropic_key="${_ANTHROPIC_KEY_VAL:-}"
   local _anthropic_headers="${_ANTHROPIC_CUSTOM_HEADERS_VAL:-}"
+  # Keep this function self-contained for repair/check harnesses that extract
+  # it without the installer's top-level initialization.
+  local _geak_agent_provider_value="${GEAK_AGENT_PROVIDER_VAL:-${GEAK_AGENT_PROVIDER:-claude}}"
+  local _geak_codex_runtime_env_vars="${_GEAK_CODEX_RUNTIME_ENV_VARS:-}"
   # Warn loudly if the Anthropic endpoint is unresolved — kernel-agent env would
   # silently lack a base URL and CLIs would resort to whatever was in the
   # operator's shell rc, defeating the point of this file.
@@ -1164,8 +1202,9 @@ write_env_file() {
     [ -n "${MAGPIE_PYTHON:-}" ] && echo "export MAGPIE_PYTHON='${MAGPIE_PYTHON}'"
     [ -n "${PYTHONPATH:-}" ] && echo "export PYTHONPATH='${PYTHONPATH}'"
     [ -n "${INFERENCEX_PATH:-}" ] && echo "export INFERENCEX_PATH='${INFERENCEX_PATH}'"
-    # The kernel-agent drives Claude Code, so only the Anthropic side is
-    # exported here; gateway/OpenAI credentials are never persisted.
+    # Claude-backed GEAK/Forge flows still consume the Anthropic side. Codex
+    # GEAK authenticates from CODEX_HOME and strips API/provider overrides, so
+    # gateway/OpenAI credentials remain deliberately unpersisted here.
     [ -n "${_anthropic_url}" ] && _emit_credential_fallback ANTHROPIC_BASE_URL "${_anthropic_url}"
     [ -n "${_anthropic_key}" ] && _emit_credential_fallback ANTHROPIC_API_KEY "${_anthropic_key}"
     # A header-authenticated gateway rejects the CLI without this, and it cannot
@@ -1192,6 +1231,15 @@ write_env_file() {
     # consumed by src/hyperloom/agents/kernel/tools/backends/geak_runner.py.
     [ -n "${GEAK_E2E_RUNNER}" ] && echo "export GEAK_E2E_RUNNER='${GEAK_E2E_RUNNER}'"
     [ -n "${GEAK_ROOT}" ] && echo "export GEAK_ROOT='${GEAK_ROOT}'"
+    echo "export GEAK_AGENT_PROVIDER='${_geak_agent_provider_value}'"
+    # GEAK Codex mode deliberately reuses the operator's normal Codex profile.
+    # Never manufacture a run-private CODEX_HOME here.
+    [ -n "${CODEX_HOME:-}" ] && echo "export CODEX_HOME='${CODEX_HOME}'"
+    local _geak_codex_name _geak_codex_value
+    for _geak_codex_name in $_geak_codex_runtime_env_vars; do
+      _geak_codex_value="${!_geak_codex_name:-}"
+      [ -n "${_geak_codex_value}" ] && echo "export ${_geak_codex_name}='${_geak_codex_value}'"
+    done
     [ -n "${GEAK_CLAUDE_MODEL_VAL}" ] && echo "export GEAK_CLAUDE_MODEL='${GEAK_CLAUDE_MODEL_VAL}'"
     # Pin the claude binary the GEAK SDK path uses (else claude_agent_sdk may
     # fall back to its older bundled CLI). run_e2e.py maps this to cli_path.
@@ -1272,6 +1320,13 @@ write_env_file() {
   [ -n "${HYPERLOOM_ROOT:-}" ] && upsert_dotenv_var HYPERLOOM_ROOT "$HYPERLOOM_ROOT"
   [ -n "${GEAK_E2E_RUNNER}" ] && upsert_dotenv_var GEAK_E2E_RUNNER "$GEAK_E2E_RUNNER"
   [ -n "${GEAK_ROOT}" ] && upsert_dotenv_var GEAK_ROOT "$GEAK_ROOT"
+  upsert_dotenv_var GEAK_AGENT_PROVIDER "$_geak_agent_provider_value"
+  [ -n "${CODEX_HOME:-}" ] && upsert_dotenv_var CODEX_HOME "$CODEX_HOME"
+  local _geak_codex_name _geak_codex_value
+  for _geak_codex_name in $_geak_codex_runtime_env_vars; do
+    _geak_codex_value="${!_geak_codex_name:-}"
+    [ -n "${_geak_codex_value}" ] && upsert_dotenv_var "${_geak_codex_name}" "${_geak_codex_value}"
+  done
   [ -n "${GEAK_CLAUDE_MODEL_VAL}" ] && upsert_dotenv_var GEAK_CLAUDE_MODEL "$GEAK_CLAUDE_MODEL_VAL"
   [ -n "${_geak_claude_bin}" ] && upsert_dotenv_var GEAK_CLAUDE_BIN "$_geak_claude_bin"
   [ -n "${GEAK_RUN_MODE_VAL}" ] && upsert_dotenv_var GEAK_RUN_MODE "$GEAK_RUN_MODE_VAL"
@@ -1284,7 +1339,7 @@ write_env_file() {
 }
 
 # Clone the e2e optimizer ("geak", formerly PerfSkills) for its
-# interface/run_e2e.py runner, then pip-install the GEAK package + claude_agent_sdk.
+# interface/run_e2e.py runner, then install the provider-specific runtime.
 ensure_geak() {
   log "ensuring e2e optimizer geak (GEAK@${GEAK_REF}, formerly PerfSkills)"
   if [ "$DRY_RUN" -eq 0 ] && [ "$CHECK_ONLY" -eq 0 ]; then
@@ -1313,23 +1368,129 @@ ensure_geak() {
     _PIP_FLAGS="-q --no-cache-dir --break-system-packages"
     # GEAK is a pip package now: install from the checkout above so the package
     # matches the interface/run_e2e.py we run and honours any GEAK_REPO/GEAK_REF
-    # override (local mirror, fork, SSH URL). Its bootstrap installs deps + the
-    # Claude Code CLI (>= 2.1.177); GEAK_HOME reuses our checkout so bootstrap
-    # skips a second clone.
+    # override (local mirror, fork, SSH URL). Pass the provider explicitly so
+    # GEAK's build hook prepares Codex rather than silently bootstrapping Claude;
+    # GEAK_HOME reuses our checkout so bootstrap skips a second clone.
     if [ -f "${GEAK_ROOT}/pyproject.toml" ] || [ -f "${GEAK_ROOT}/setup.py" ]; then
-      run env GEAK_HOME="${GEAK_ROOT}" python3 -m pip install ${_PIP_FLAGS} "${GEAK_ROOT}" || \
-        warn "GEAK pip install failed; Claude Code may be < 2.1.177"
+      run env GEAK_HOME="${GEAK_ROOT}" \
+        GEAK_AGENT_PROVIDER="${GEAK_AGENT_PROVIDER_VAL}" \
+        GEAK_NODE_BIN="${GEAK_NODE_BIN:-node}" \
+        GEAK_CODEX_BIN="${GEAK_CODEX_BIN:-codex}" \
+        python3 -m pip install ${_PIP_FLAGS} "${GEAK_ROOT}" || \
+        warn "GEAK pip install failed; ${GEAK_AGENT_PROVIDER_VAL} runtime may be unavailable"
     else
-      warn "GEAK package metadata missing at ${GEAK_ROOT}; skipping pip install (Claude Code may be < 2.1.177)"
+      warn "GEAK package metadata missing at ${GEAK_ROOT}; skipping ${GEAK_AGENT_PROVIDER_VAL} runtime bootstrap"
     fi
-    run python3 -m pip install ${_PIP_FLAGS} claude-agent-sdk anyio || \
-      warn "claude-agent-sdk install failed; run_e2e.py will fall back to the claude CLI"
+    if [ "$GEAK_AGENT_PROVIDER_VAL" = "claude" ]; then
+      run python3 -m pip install ${_PIP_FLAGS} claude-agent-sdk anyio || \
+        warn "claude-agent-sdk install failed; run_e2e.py will fall back to the claude CLI"
+    fi
     if [ ! -f "${GEAK_E2E_RUNNER}" ]; then
       warn "e2e runner not found at ${GEAK_E2E_RUNNER} (interface/ missing — is the checkout on the ${GEAK_REF} branch with the e2e code?)"
     fi
   else
     log "check-only: skipping e2e optimizer sdk installation"
   fi
+}
+
+# GEAK's Codex provider is a CLI compatibility runtime, not an OpenAI API
+# client. Validate the exact tools and ChatGPT login it will inherit before a
+# GPU run starts. We intentionally do not create CODEX_HOME or accept
+# OPENAI_API_KEY here: the normal user profile (explicit $CODEX_HOME, otherwise
+# ~/.codex) is the source of subscription authentication.
+preflight_geak_codex_runtime() {
+  [ "$GEAK_AGENT_PROVIDER_VAL" = "codex" ] || return 0
+
+  case "$(printf '%s' "${GEAK_CODEX_NETWORK_ACCESS:-}" | tr '[:upper:]' '[:lower:]')" in
+    1|true|yes|on)
+      case "$(printf '%s' "${GEAK_CODEX_EXTERNAL_SANDBOX:-}" | tr '[:upper:]' '[:lower:]')" in
+        1|true|yes|on) ;;
+        *)
+          if [ "$CHECK_ONLY" -eq 1 ]; then
+            warn "GEAK_CODEX_NETWORK_ACCESS requires GEAK_CODEX_EXTERNAL_SANDBOX=1 and an isolated worker with restricted egress"
+            return 0
+          fi
+          die "GEAK_CODEX_NETWORK_ACCESS requires GEAK_CODEX_EXTERNAL_SANDBOX=1 and an isolated worker with restricted egress"
+          ;;
+      esac
+      ;;
+  esac
+
+  if [ "$DRY_RUN" -eq 1 ]; then
+    log "would verify Node.js 18+, Codex exec compatibility, and ChatGPT login using the normal Codex profile"
+    return 0
+  fi
+
+  local node_request="${GEAK_NODE_BIN:-node}" codex_request="${GEAK_CODEX_BIN:-codex}"
+  local node_bin="" codex_bin="" node_version="" node_major="" codex_help="" login_status=""
+  node_bin="$(command -v "$node_request" 2>/dev/null || true)"
+  codex_bin="$(command -v "$codex_request" 2>/dev/null || true)"
+
+  if [ -z "$node_bin" ]; then
+    if [ "$CHECK_ONLY" -eq 1 ]; then
+      warn "GEAK Codex provider requires Node.js 18+; could not find ${node_request}"
+      return 0
+    fi
+    die "GEAK Codex provider requires Node.js 18+; install it or set GEAK_NODE_BIN"
+  fi
+  node_version="$("$node_bin" --version 2>/dev/null || true)"
+  node_major="${node_version#v}"; node_major="${node_major%%.*}"
+  if ! [[ "$node_major" =~ ^[0-9]+$ ]] || [ "$node_major" -lt 18 ]; then
+    if [ "$CHECK_ONLY" -eq 1 ]; then
+      warn "GEAK Codex provider requires Node.js 18+; ${node_bin} reported ${node_version:-unknown}"
+      return 0
+    fi
+    die "GEAK Codex provider requires Node.js 18+; ${node_bin} reported ${node_version:-unknown}"
+  fi
+  if [ -z "$codex_bin" ]; then
+    if [ "$CHECK_ONLY" -eq 1 ]; then
+      warn "GEAK Codex provider requires the Codex CLI; could not find ${codex_request}"
+      return 0
+    fi
+    die "GEAK Codex provider requires the Codex CLI. Install Codex, run 'codex login', or set GEAK_CODEX_BIN"
+  fi
+
+  codex_help="$("$codex_bin" exec --help 2>&1 || true)"
+  local required_flag
+  for required_flag in --config --ephemeral --ignore-user-config --ignore-rules --output-schema --output-last-message --skip-git-repo-check; do
+    if ! printf '%s\n' "$codex_help" | grep -F -- "$required_flag" >/dev/null; then
+      if [ "$CHECK_ONLY" -eq 1 ]; then
+        warn "Codex CLI at ${codex_bin} is incompatible with GEAK (missing ${required_flag}); update Codex"
+        return 0
+      fi
+      die "Codex CLI at ${codex_bin} is incompatible with GEAK (missing ${required_flag}); update Codex"
+    fi
+  done
+
+  # Remove every API/access-token override the GEAK runtime itself strips. The
+  # status must prove that the inherited profile is logged in through ChatGPT,
+  # not merely that an API credential exists in the installer environment.
+  login_status="$(env \
+    -u OPENAI_API_KEY -u OPENAI_ACCESS_TOKEN -u OPENAI_BASE_URL \
+    -u OPENAI_API_BASE -u OPENAI_API_URL -u OPENAI_API_TYPE \
+    -u OPENAI_API_VERSION -u OPENAI_HOST -u OPENAI_ORG_ID \
+    -u OPENAI_ORGANIZATION -u OPENAI_PROJECT -u OPENAI_PROJECT_ID \
+    -u AZURE_OPENAI_API_KEY -u AZURE_OPENAI_ENDPOINT \
+    -u AZURE_OPENAI_BASE_URL -u CODEX_API_KEY -u CODEX_OSS_BASE_URL \
+    -u CODEX_MODEL_PROVIDER -u CODEX_REFRESH_TOKEN_URL_OVERRIDE \
+    -u CODEX_ACCESS_TOKEN -u CODEX_ID_TOKEN -u CODEX_REFRESH_TOKEN \
+    -u CHATGPT_ACCESS_TOKEN -u CHATGPT_REFRESH_TOKEN \
+    -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN \
+    -u ANTHROPIC_CUSTOM_HEADERS -u CLAUDE_CODE_OAUTH_TOKEN \
+    -u GEAK_API_KEY -u LLM_API_KEY -u AMD_LLM_API_KEY -u SAFE_API_KEY \
+    -u LLM_GATEWAY_KEY \
+    "$codex_bin" login status 2>&1 || true)"
+  if ! printf '%s\n' "$login_status" | grep -E '^[[:space:]]*Logged in using ChatGPT[[:space:]]*$' >/dev/null; then
+    if [ "$CHECK_ONLY" -eq 1 ]; then
+      warn "GEAK Codex provider needs ChatGPT subscription login in the execution environment; run '${codex_bin} login'"
+      return 0
+    fi
+    die "GEAK Codex provider needs ChatGPT subscription login in the execution environment. Run '${codex_bin} login' (no OPENAI_API_KEY is required)."
+  fi
+
+  export GEAK_NODE_BIN="$node_bin"
+  export GEAK_CODEX_BIN="$codex_bin"
+  log "GEAK Codex runtime verified: node=${node_version}, codex=${codex_bin}, auth=ChatGPT (normal CODEX_HOME)"
 }
 
 # The forge backend drives the `claude` CLI inside its autonomous loop
@@ -1481,6 +1642,7 @@ main() {
   # The GEAK e2e whole-pipeline optimizer is always installed; whether it is
   # used at runtime is decided per-session via KERNEL_OPT_BACKEND_ORDER.
   ensure_geak
+  preflight_geak_codex_runtime
   _prune_dep_cache "TraceLens" "GEAK"
   ensure_forge_claude_cli
   write_env_file

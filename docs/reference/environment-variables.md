@@ -31,9 +31,9 @@ These variables configure LLM gateway access and optional backend credentials.
 | `ANTHROPIC_AUTH_TOKEN` | No       | —    | Claude CLI auth token alias, accepted in place of `ANTHROPIC_API_KEY`. Preflight never fills it; the Ray / e2e / forge-fusion env builders default it from the Anthropic-side key when they hand credentials to a subprocess.                                                                        |
 | `ANTHROPIC`<br>`_CUSTOM_HEADERS` | No | —    | Extra request headers for the Anthropic side, for gateways that authenticate on a header of their own (for example Azure API Management). Newline-delimited `Name: value` as in the Anthropic SDK; a JSON object is accepted too. `${VAR}` references are expanded from the same environment, so a gateway header can reuse `ANTHROPIC_API_KEY` instead of duplicating the secret. |
 | `CLAUDE_CODE`<br>`_OAUTH_TOKEN` | No | — | Claude Max/Pro subscription token from `claude setup-token`. Lowest-priority Anthropic credential: either API-key variable outranks it. On its own it implies `https://api.anthropic.com`. Passed to subprocesses verbatim and never copied into `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, or `~/.claude/config.json`, which would switch the run to API-credits billing. |
-| `GEAK_API_KEY`         | No       | —    | Internal alias, never derived from either side. GEAK runs on the Anthropic side (`ANTHROPIC_*` + `GEAK_CLAUDE_MODEL`); set this only to point GEAK elsewhere.                                                                                                                              |
-| `GEAK_BASE_URL`        | No       | —    | Internal alias, never derived from either side. Set it only to point GEAK at a different endpoint than the Anthropic side.                                                                                                                          |
-| `GEAK_CLAUDE_MODEL`   | No       | Inherits `CLAUDE_MODEL` | GEAKv4 Claude Code workflow model id.                                                                                                                                                           |
+| `GEAK_API_KEY`         | No       | —    | Claude-provider alias, never derived from either side. Set this only to point GEAK's Claude mode elsewhere. Codex mode does not use it.                                                                                                                              |
+| `GEAK_BASE_URL`        | No       | —    | Claude-provider alias, never derived from either side. Set this only to point GEAK's Claude mode at a different endpoint. Codex mode does not use it.                                                                                                                          |
+| `GEAK_CLAUDE_MODEL`   | No       | Inherits `CLAUDE_MODEL` | GEAK Claude-provider model id. Ignored by Codex mode.                                                                                                                                                           |
 | `FORGE_CLAUDE_MODEL`  | No       | Inherits `CLAUDE_MODEL` | Forge Claude backend model id (fusion, rewrite, collective). Set when Forge should use a different Claude model than orchestration.                                                                                   |
 | `FORGE_CODEX_MODEL`   | No       | Inherits `CODEX_MODEL`  | Forge Codex backend model id (fusion, rewrite, collective). Set when Forge should use a different Codex model than the OpenAI-side default.                                                                          |
 | `LANGFUSE_HOST`        | No (required <br> only <br> when `HYPER`<br>`LOOM_LA`<br>`NGFUSE`<br>`_ENABLE=1`) | Unset | Base URL of your Langfuse deployment (for example, `https://langfuse.<your-domain>`). Used by both the live trace push and the offline `backfill_langfuse` CLI. |
@@ -52,6 +52,7 @@ The following variables configure filesystem paths for Hyperloom's runtime depen
 | `INFERENCEX_PATH`                         | Conditional          | Auto-cloned by `install.sh`                                    | Path to the SemiAnalysisAI/InferenceX repo, used by baseline / target analysis. `install.sh` clones it when unset; only required if that auto-clone fails.                                                                                                                                          |
 | `TRACELENS_ROOT`                          | No (installer auto-clones) | `${HYPER`<br>`LOOM_CA`<br>`CHE_DIR:-`<br>`$REPO_ROOT`<br>`/.cache}/Tr`<br>`aceLens@<resolved-sha>` (auto-clone of `AMD-AGI/TraceLens` pinned to a fixed SHA) | `src/hyperloom/agents/kernel/scripts/install.sh` clones the public repo into the repo-local cache root when unset. Export it to opt into a pre-existing checkout you maintain — that is an explicit operator override and skips both the clone and the SHA pin. |
 | `GEAK_CLAUDE_BIN`                          | No (installer auto-resolves) | First of `$HOME/.local/bin/claude`, `/usr/local/bin/claude`, `$(command -v claude)`; written to `kernel-agent.env.sh` | Pins the Claude Code binary the GEAK SDK path uses, so `claude_agent_sdk` doesn't fall back to its older bundled CLI. Export to force a specific build. |
+| `CODEX_HOME`                              | No                   | `~/.codex` (Codex CLI default)                                      | Profile used by GEAK's Codex provider. Hyperloom preserves an explicitly set path through generated env and Ray workers; otherwise it leaves the variable unset so Codex uses the user's normal profile. GEAK never creates a run-private profile or copies `auth.json`. A container or remote worker must mount the profile at this path. |
 | `USER_DATA_PATH`                          | No                   | `/workspace/hyperloom`                                             | Session directory root (logs, runs, mirrors, breakdown). Replaces the retired `INFERENCE_OPTIMIZER_SESSION_DIR` and `WORKSPACE_PATH`.                                                |
 | `HYPERLOOM_`<br>`RUNTIME_DIR`             | No                   | `$USER_DATA_PATH/runtime` (installer)                               | Private writable runtime state. Codex SDK turns create a unique mode-`0700` `CODEX_HOME` here and remove it after the SDK client closes. When unset, Codex uses the first safe declared output root, then a run-local working directory; it never falls back to `/tmp` or a source checkout. |
 | `INFERENCE_`<br>`OPTIMI`<br>`ZER_CU`<br>`RRENT_S`<br>`ESSION_DIR` | No (set by CLI) | Set at session boot | Absolute path to the active session directory. Written by the CLI when a session starts and inherited by every benchmark subprocess; session-path resolution prefers it over scanning `USER_DATA_PATH`. Do not set by hand. |
@@ -175,6 +176,42 @@ its answer extraction depends on, so that list is never displaced: an explicit
 `HYPERLOOM_EVAL_STOP_STRINGS` goes first, the task's list next, and derived
 terminators last. Derived token ids travel separately as `stop_token_ids`, which
 has no such limit, so nothing is lost on a server that supports it.
+
+---
+
+## GEAK role-agent runtime
+
+`GEAK_AGENT_PROVIDER` chooses which CLI executes GEAK's role-agent turns. The
+default is Claude and preserves existing behavior. Codex mode runs the same
+whole-pipeline `e2e_workflow` and stable Hyperloom handoff through the GEAK
+Codex compatibility runtime.
+
+Codex mode requires Node.js 18 or newer and `codex login status` to report
+`Logged in using ChatGPT` in the actual execution environment. It intentionally
+does not accept or require `OPENAI_API_KEY`; authentication comes from the
+normal `CODEX_HOME` described above. The installer persists and Ray forwards
+the following non-secret controls:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `GEAK_AGENT_PROVIDER` | `claude` | `claude` or `codex`; invalid values fail preflight instead of being inferred from installed credentials. |
+| `GEAK_NODE_BIN` | `node` | Node.js executable for the Codex workflow compatibility host. Must be Node.js 18 or newer. |
+| `GEAK_CODEX_BIN` | `codex` | Codex CLI used for compatibility checks (including the required `--config`/ephemeral/schema flags), ChatGPT login checks, and role-agent turns. |
+| `GEAK_CODEX_MODEL` | Codex CLI default | Optional model override for all GEAK role-agent turns. |
+| `GEAK_CODEX_EFFORT` | `high` | Reasoning effort: `low`, `medium`, `high`, `xhigh`, or `max`; GEAK also maps its `ultracode` alias to `max`. |
+| `GEAK_CODEX_MAX_CONCURRENCY` | `4` | Maximum simultaneous `codex exec` children; logical workflow result ordering remains deterministic. |
+| `GEAK_CODEX_AGENT_TIMEOUT_S` | `7200` | Default hard timeout for one agent call, including its concurrency wait and Codex turn. The shared login/capability preflight runs once under the top-level workflow timeout. |
+| `GEAK_CODEX_MAX_OUTPUT_BYTES` | `1048576` | Maximum captured stdout/stderr tail for each child process. |
+| `GEAK_CODEX_MAX_WORKFLOW_DEPTH` | `32` | Maximum recursive `workflow()` nesting. |
+| `GEAK_CODEX_KILL_GRACE_MS` | `1500` | SIGTERM grace period before remaining Codex process groups receive SIGKILL. |
+| `GEAK_CODEX_SANDBOX` | `workspace-write` | `read-only`, `workspace-write`, or `danger-full-access`. Unrestricted mode also requires the external-sandbox acknowledgement below. |
+| `GEAK_CODEX_NETWORK_ACCESS` | `0` | Enables command network access while retaining `workspace-write` filesystem scoping. Requires `GEAK_CODEX_EXTERNAL_SANDBOX=1`: the outer worker must restrict egress to loopback/required destinations, expose no unrelated secrets or mounts, and use a short-lived ChatGPT login. Do not enable this on a normal host. |
+| `GEAK_CODEX_ADD_DIRS` | Empty | Extra writable paths as a JSON string array or an OS-path-separator-delimited list. Prefer this narrow extension to unrestricted execution. |
+| `GEAK_CODEX_EXTERNAL_SANDBOX` | `0` | Required acknowledgement for command network or unrestricted filesystem execution. Set to `1` only when a trusted outer worker/container supplies the isolation and egress boundary; it does not create that boundary. |
+| `GEAK_CODEX_BYPASS_SANDBOX` | `0` | Uses Codex's dangerous bypass flag only when this and `GEAK_CODEX_EXTERNAL_SANDBOX` are both `1`. |
+
+See [GEAK](../components/geak.md#select-claude-code-or-codex) for setup and
+container/worker profile-mount guidance.
 
 ---
 

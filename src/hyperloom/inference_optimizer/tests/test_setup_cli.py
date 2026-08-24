@@ -84,6 +84,11 @@ def test_setup_cli_scrubs_ambient_llm_env_when_dotenv_exists(tmp_path: Path, mon
     monkeypatch.setenv("LLM_GATEWAY_KEY", "stale-gateway-key")
     monkeypatch.setenv("CLAUDE_MODEL", "stale-claude-model")
     monkeypatch.setenv("CODEX_MODEL", "stale-codex-model")
+    monkeypatch.setenv("GEAK_AGENT_PROVIDER", "codex")
+    monkeypatch.setenv("GEAK_NODE_BIN", "/stale/node")
+    monkeypatch.setenv("GEAK_CODEX_BIN", "/stale/codex")
+    monkeypatch.setenv("GEAK_CODEX_NETWORK_ACCESS", "1")
+    monkeypatch.setenv("CODEX_HOME", "/home/operator/.codex")
     monkeypatch.setattr(setup, "_INSTALL_BAREMETAL_SH", installer)
     monkeypatch.setattr(setup, "_PACKAGE_SKILL", tmp_path / "SKILL.md")
     monkeypatch.setattr(setup.subprocess, "run", _fake_run)
@@ -106,8 +111,13 @@ def test_setup_cli_scrubs_ambient_llm_env_when_dotenv_exists(tmp_path: Path, mon
         "LLM_GATEWAY_KEY",
         "CLAUDE_MODEL",
         "CODEX_MODEL",
+        "GEAK_AGENT_PROVIDER",
+        "GEAK_NODE_BIN",
+        "GEAK_CODEX_BIN",
+        "GEAK_CODEX_NETWORK_ACCESS",
     ):
         assert key not in env
+    assert env["CODEX_HOME"] == "/home/operator/.codex"
 
 
 def test_setup_cli_scrubs_stale_workspace_runtime_env_when_dotenv_exists(tmp_path: Path, monkeypatch):
