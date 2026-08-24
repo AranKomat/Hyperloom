@@ -32,7 +32,9 @@ _AMBIENT_LLM_ENV_KEYS = {
     "LLM_GATEWAY_KEY",
     "CLAUDE_MODEL",
     "CODEX_MODEL",
+    "GEAK_AGENT_PROVIDER",
     "GEAK_CLAUDE_MODEL",
+    "GEAK_NODE_BIN",
     "FORGE_CLAUDE_MODEL",
     "FORGE_CODEX_MODEL",
 }
@@ -95,6 +97,7 @@ def _scrub_ambient_setup_env(env: dict[str, str], env_file: Path) -> None:
         if (
             key in _AMBIENT_LLM_ENV_KEYS
             or key in _AMBIENT_RUNTIME_ENV_KEYS
+            or key.startswith("GEAK_CODEX_")
             or key.startswith(_AMBIENT_LLM_ENV_PREFIXES)
         ):
             env.pop(key, None)

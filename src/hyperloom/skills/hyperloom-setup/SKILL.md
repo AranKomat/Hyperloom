@@ -100,6 +100,13 @@ value.
      `Use default (https://api.anthropic.com)` /
      `Use AMD gateway (https://llm-api.amd.com/anthropic)` / `Custom`.
    - Ask `CLAUDE_MODEL`: options `Use default (claude-opus-5)` / `Custom`.
+   - Ask `GEAK_AGENT_PROVIDER` with exactly these option labels in this order:
+     `claude (Recommended default)` / `codex`.
+   - If the user chooses `codex`, explain that this changes GEAK's role-agent
+     runtime only. Hyperloom's other components still need the Anthropic
+     credential above. Do not ask for an OpenAI API key: GEAK Codex mode uses
+     `codex login` with the user's ChatGPT subscription and normal Codex profile
+     (`CODEX_HOME` when set, otherwise `~/.codex`).
 4. Explain `USER_DATA_PATH`:
    - It is the writable root for Hyperloom runtime files, dependency checkouts, logs, optimizer runs, and generated env files.
    - Offer `<workspace>/session` (the current workspace directory plus a
@@ -157,6 +164,9 @@ value.
    - If the chosen host is not the current host, tell the user that the demo
      skill will first SSH to that host and run all Docker commands there. Do not
      start or restart any Slurm job from setup.
+   - With `GEAK_AGENT_PROVIDER=codex`, resolve the normal Codex profile on this
+     chosen target host. A login or `CODEX_HOME` path that exists only on the
+     current/login host is not sufficient.
 
 7. Only when the user chose `baremetal`, ask whether to install a serving
    framework (used as the `--install-framework` value in Step 4). Present exactly
@@ -182,7 +192,7 @@ Before writing, explicitly tell the user:
 - A dedicated workspace is recommended to avoid modifying an existing project's
   `.env`.
 
-- For every value the user chose in this run (base URL, model, run
+- For every value the user chose in this run (base URL, model, GEAK provider, run
   mode, `USER_DATA_PATH`, Docker target host), write exactly what the user
   selected. This wins over any pre-existing value in `.env` or the shell
   environment — e.g. if the user picked the Anthropic official URL, write
@@ -199,6 +209,11 @@ Write the Anthropic keys plus the common keys:
 Common keys:
 
 - `USER_DATA_PATH`
+- `GEAK_AGENT_PROVIDER` (`claude` or `codex`; always write the explicit choice)
+- `CODEX_HOME` only when `GEAK_AGENT_PROVIDER=codex` and the user already has
+  an explicit absolute `CODEX_HOME` in the shell. Otherwise leave it unset so
+  Codex uses that execution host's normal `~/.codex`; never create a
+  workspace-private profile.
 - `HYPERLOOM_RUN_MODE` (`baremetal` or `docker`, the resolved run mode for this session)
 - `HYPERLOOM_DOCKER_TARGET_HOST` (only when `HYPERLOOM_RUN_MODE=docker`; the host
   where the demo skill should run Docker)
@@ -235,6 +250,21 @@ Then read `.env` back and confirm:
 - no secret key still equals `<PLEASE_FILL_IN>`.
 
 If any required secret is missing or still a placeholder, stop and ask the user to edit `.env` again.
+
+When `GEAK_AGENT_PROVIDER=codex`, also verify subscription authentication
+without printing or copying credentials:
+
+```bash
+node --version                 # must be v18 or newer
+codex login status            # must report: Logged in using ChatGPT
+```
+
+If the login is missing on bare metal, ask the user to run `codex login` in the
+same account/environment and retry. Do not accept `OPENAI_API_KEY` as a
+substitute and do not create a workspace-private `CODEX_HOME`. In Docker mode,
+defer this probe until the container exists; the demo skill must mount the
+user's existing normal Codex profile at the same absolute path and pass
+`CODEX_HOME` when it was explicitly set.
 
 ## Step 4: Run Setup Backend
 
@@ -283,6 +313,9 @@ After writing `.env`, tell the user:
 - setup on the host is skipped in docker mode;
 - the demo skill will `docker run` + `docker exec` setup inside the ROCm container;
 - `FRAMEWORK` being unset after this skill is expected.
+- when `GEAK_AGENT_PROVIDER=codex`, the demo skill will mount the existing
+  normal Codex profile into the container and verify `codex login status`
+  there; credentials are never copied into `.env` or the workspace.
 
 This skill does not start a container. `HYPERLOOM_RUN_MODE` is recorded so the
 example (workload) skill can decide whether to generate a Docker container when
@@ -317,6 +350,8 @@ Report:
 - The setup command that was run (or that host setup was skipped in `docker` mode).
 - Whether setup completed or failed (in `docker` mode, report that host setup was skipped).
 - The detected `FRAMEWORK` value (or that it is unset).
+- The selected `GEAK_AGENT_PROVIDER`; for `codex`, whether ChatGPT login was
+  verified in the actual execution environment or is deferred to Docker.
 - The last relevant error lines on failure.
 
 Do not print secret values back to the user.

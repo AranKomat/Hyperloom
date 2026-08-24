@@ -336,6 +336,9 @@ def force_restart_local_cluster(
 SAFE_ENV_KEYS = (
     "PATH",
     "HOME",
+    # Preserve the operator's normal Codex profile. No private CODEX_HOME is
+    # generated for GEAK; absent this override Codex continues to use ~/.codex.
+    "CODEX_HOME",
     "LD_LIBRARY_PATH",
     "HYPERLOOM_KERNEL_AGENT_ROOT",
     "KERNEL_AGENT_ROOT",
@@ -373,8 +376,23 @@ SAFE_ENV_KEYS = (
     # interface/run_e2e.py and the e2e_workflow/ checkout.
     "GEAK_ROOT",
     "GEAK_E2E_RUNNER",
+    "GEAK_AGENT_PROVIDER",
     "GEAK_CLAUDE_EFFORT",
     "GEAK_CLAUDE_MODEL",
+    "GEAK_NODE_BIN",
+    "GEAK_CODEX_BIN",
+    "GEAK_CODEX_MODEL",
+    "GEAK_CODEX_EFFORT",
+    "GEAK_CODEX_MAX_CONCURRENCY",
+    "GEAK_CODEX_AGENT_TIMEOUT_S",
+    "GEAK_CODEX_MAX_OUTPUT_BYTES",
+    "GEAK_CODEX_MAX_WORKFLOW_DEPTH",
+    "GEAK_CODEX_KILL_GRACE_MS",
+    "GEAK_CODEX_SANDBOX",
+    "GEAK_CODEX_NETWORK_ACCESS",
+    "GEAK_CODEX_ADD_DIRS",
+    "GEAK_CODEX_BYPASS_SANDBOX",
+    "GEAK_CODEX_EXTERNAL_SANDBOX",
     # Forge-fusion model overrides (mirrors GEAK_CLAUDE_MODEL for each backend).
     "FORGE_CLAUDE_MODEL",
     "FORGE_CODEX_MODEL",

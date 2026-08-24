@@ -32,6 +32,11 @@ Hyperloom needs at most two classes of configuration:
    is writable, otherwise to `session/` under the current directory); setup
    writes the runtime env files and updates `.env`.
 
+GEAK also has an optional, independent role-agent login: when
+`GEAK_AGENT_PROVIDER=codex`, its agent turns use the Codex CLI authenticated by
+the user's ChatGPT subscription. That login does not replace the LLM gateway
+credential Hyperloom's orchestration and other components still require.
+
 Hyperloom never borrows one provider's key or endpoint for the other. A side is
 configured by `ANTHROPIC_BASE_URL` + `ANTHROPIC_API_KEY`, or by
 `OPENAI_BASE_URL` + `OPENAI_API_KEY`, or both. A side you leave unset
@@ -41,8 +46,9 @@ preflight rather than being silently completed from the other provider.
 The only values still filled for you are the internal LLM aliases
 (`LLM_API_KEY`, `AMD_LLM_API_KEY`, `LLM_API_BASE`), which the inference optimizer
 CLI preflight copies from the OpenAI side. You do not set those by hand.
-`GEAK_API_KEY` / `GEAK_BASE_URL` are never filled from either side: GEAK runs on
-the Anthropic side, so set them only to point GEAK at something else.
+`GEAK_API_KEY` / `GEAK_BASE_URL` are never filled from either side. They apply
+only to GEAK's default Claude provider, so set them only to point that provider
+somewhere else. GEAK's Codex provider ignores them.
 
 ---
 
@@ -85,9 +91,14 @@ three shapes are accepted; anything else fails preflight.
 
 | Shape | Set | Effect |
 |-------|-----|--------|
-| OpenAI side only | `OPENAI_BASE_URL` + `OPENAI_API_KEY` | Codex runs; Claude and GEAK are disabled |
-| Anthropic side only | `ANTHROPIC_BASE_URL` + `ANTHROPIC_API_KEY` | Claude and GEAK run; Codex (OpenAI-protocol) is disabled |
-| Both sides | all four, each side self-consistent | Everything runs |
+| OpenAI side only | `OPENAI_BASE_URL` + `OPENAI_API_KEY` | OpenAI-protocol features run; Claude and GEAK's default Claude provider are disabled |
+| Anthropic side only | `ANTHROPIC_BASE_URL` + `ANTHROPIC_API_KEY` | Claude and GEAK's default Claude provider run; OpenAI-protocol features are disabled |
+| Both sides | all four, each side self-consistent | Both protocol sides and GEAK's default Claude provider run |
+
+GEAK Codex mode is orthogonal to these gateway shapes. It can replace GEAK's
+Claude role-agent turns in any otherwise valid Hyperloom configuration after a
+separate ChatGPT login, as described in
+[GEAK with a ChatGPT subscription](#geak-with-a-chatgpt-subscription).
 
 One gateway serving both providers is the third shape: point both base URLs at
 it and set both keys, even when the key value is the same.
@@ -101,8 +112,10 @@ it and set both keys, even when the key value is the same.
 
 Downstream tooling reads the side it belongs to:
 
-* GEAK runs Claude Code, so it uses the Anthropic-side base URL + key plus
-  `GEAK_CLAUDE_MODEL`. An OpenAI-only deployment cannot start it.
+* GEAK defaults to Claude Code, using the Anthropic-side base URL + key plus
+  `GEAK_CLAUDE_MODEL`. With `GEAK_AGENT_PROVIDER=codex`, only GEAK's role-agent
+  turns switch to the ChatGPT-authenticated Codex CLI; no OpenAI API key is
+  passed to those turns.
 * Kernel tools inherit the OpenAI-side credential from preflight
   (`LLM_API_KEY` / `AMD_LLM_API_KEY`).
 * Orchestration Claude uses the Anthropic-side base URL + key, including the
@@ -152,8 +165,9 @@ Set each side explicitly.
 Preflight resolves `(anthropic_base_url, openai_base_url)` independently: each
 side is its own explicit base URL, or the official SDK endpoint implied by that
 side's own key, or empty. Claude CLI auth uses `ANTHROPIC_API_KEY` (or
-`ANTHROPIC_AUTH_TOKEN`); GEAK uses the same Anthropic-side URL and key. Neither
-side is ever completed from the other.
+`ANTHROPIC_AUTH_TOKEN`); GEAK's default Claude provider uses the same
+Anthropic-side URL and key. GEAK's optional Codex provider is authenticated
+separately through ChatGPT. Neither API side is ever completed from the other.
 
 To pin models in split mode:
 
@@ -181,6 +195,40 @@ then bill API credits instead of the subscription. For the same reason preflight
 warns when a token and an API key are set together. A subscription token is also
 not accepted by the gateway model-catalog probe, so preflight skips that probe
 and trusts the model id you passed.
+
+### GEAK with a ChatGPT subscription
+
+Set `GEAK_AGENT_PROVIDER=codex` to run GEAK's standard whole-pipeline workflow
+with Codex role-agent turns. This path uses the user's ChatGPT subscription,
+not OpenAI API credits:
+
+```bash
+codex login
+codex login status       # must report: Logged in using ChatGPT
+export GEAK_AGENT_PROVIDER=codex
+```
+
+Node.js 18 or newer and a current Codex CLI must be installed in the same
+environment that executes GEAK. Hyperloom removes OpenAI API/access-token
+overrides when checking the login and GEAK removes them from every Codex child,
+so `OPENAI_API_KEY` neither authenticates nor changes billing for this path.
+See OpenAI's [Codex authentication guide](https://learn.chatgpt.com/docs/auth)
+for subscription sign-in and headless device authentication.
+
+GEAK deliberately reuses the normal Codex profile: an explicitly exported
+`CODEX_HOME`, or the CLI default `~/.codex`. Hyperloom does not create a
+run-private home for this provider and does not copy credentials into `.env`.
+For Docker or remote Ray execution, mount that existing profile at the same
+path and pass `CODEX_HOME` when non-default. Treat any profile `auth.json` as a
+password: never add it to the repository, an image layer, logs, or run output.
+If Codex commands need network access, use only a dedicated externally isolated
+worker with egress restricted to loopback/required destinations, no unrelated
+secrets or mounts, and a short-lived ChatGPT login. Workspace-write alone does
+not prevent a command from reading and exfiltrating the mounted credential.
+
+This login is scoped to GEAK. Hyperloom still requires one valid gateway or
+Claude subscription credential for orchestration and the remaining agent/tool
+paths, as described above.
 
 ### Non-AMD / self-hosted gateway
 
@@ -295,7 +343,7 @@ explicit path pointing at a missing directory fails preflight.
 
 ## Direct upstream wiring
 
-Claude, Codex, and GEAK talk to the configured upstream gateway directly.
+Claude, OpenAI-protocol tools, and GEAK's Claude provider talk to the configured upstream gateway directly.
 The AMD primus-safe gateway accepts both header styles natively.
 
 At preflight, the inference optimizer CLI:
@@ -317,7 +365,9 @@ At preflight, the inference optimizer CLI:
 3. Inspect `~/.claude/config.json` — `customApiUrl` must point at the
    resolved Anthropic-side upstream gateway.
 
-GEAK uses the generated runtime configuration directly.
+GEAK uses the generated runtime configuration directly. Its Codex provider is
+the exception: it uses the normal ChatGPT-authenticated Codex profile and never
+uses the generated gateway API aliases for role-agent turns.
 
 ---
 

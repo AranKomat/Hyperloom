@@ -1433,6 +1433,184 @@ def _check_platform_tuning() -> None:
 
 _TRACELENS_REQUIRED_CLIS: tuple[str, ...] = ("TraceLens_generate_perf_report_pytorch_inference",)
 
+_GEAK_AGENT_PROVIDERS: frozenset[str] = frozenset({"claude", "codex"})
+_GEAK_CODEX_REQUIRED_EXEC_FLAGS: tuple[str, ...] = (
+    "--config",
+    "--ephemeral",
+    "--ignore-user-config",
+    "--ignore-rules",
+    "--output-schema",
+    "--output-last-message",
+    "--skip-git-repo-check",
+)
+_GEAK_CODEX_API_AUTH_ENV_NAMES: frozenset[str] = frozenset(
+    {
+        "OPENAI_API_KEY",
+        "OPENAI_ACCESS_TOKEN",
+        "OPENAI_BASE_URL",
+        "OPENAI_API_BASE",
+        "OPENAI_API_URL",
+        "OPENAI_API_TYPE",
+        "OPENAI_API_VERSION",
+        "OPENAI_HOST",
+        "OPENAI_ORG_ID",
+        "OPENAI_ORGANIZATION",
+        "OPENAI_PROJECT",
+        "OPENAI_PROJECT_ID",
+        "AZURE_OPENAI_API_KEY",
+        "AZURE_OPENAI_ENDPOINT",
+        "AZURE_OPENAI_BASE_URL",
+        "CODEX_API_KEY",
+        "CODEX_OSS_BASE_URL",
+        "CODEX_MODEL_PROVIDER",
+        "CODEX_REFRESH_TOKEN_URL_OVERRIDE",
+        "CODEX_ACCESS_TOKEN",
+        "CODEX_ID_TOKEN",
+        "CODEX_REFRESH_TOKEN",
+        "CHATGPT_ACCESS_TOKEN",
+        "CHATGPT_REFRESH_TOKEN",
+        "ANTHROPIC_API_KEY",
+        "ANTHROPIC_AUTH_TOKEN",
+        "ANTHROPIC_CUSTOM_HEADERS",
+        "CLAUDE_CODE_OAUTH_TOKEN",
+        "GEAK_API_KEY",
+        "LLM_API_KEY",
+        "AMD_LLM_API_KEY",
+        "SAFE_API_KEY",
+        "LLM_GATEWAY_KEY",
+    }
+)
+_GEAK_CODEX_API_AUTH_ENV_RE = re.compile(r"^(OPENAI|AZURE_OPENAI).*_(API_KEY|BASE_URL|API_BASE|API_URL|ENDPOINT)$")
+_GEAK_CODEX_CHATGPT_LOGIN_RE = re.compile(r"^\s*Logged in using ChatGPT\s*$", re.MULTILINE)
+
+
+def _geak_env_flag(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _validate_geak_agent_provider(args: argparse.Namespace | None = None) -> None:
+    """Fail early when the selected GEAK role-agent runtime cannot start.
+
+    Claude remains the default and retains its existing installer/preflight
+    path. Codex mode is intentionally authenticated independently from the
+    OpenAI API side: it inherits the operator's normal ``CODEX_HOME`` (or the
+    CLI's ``~/.codex`` default), strips API/token overrides for the status
+    probe, and requires ``codex login status`` to report ChatGPT.
+
+    Args:
+        args: Parsed optimize args, used to skip the tool probe when the kernel
+            phase is disabled. Provider spelling is still validated.
+    """
+    raw_provider = os.environ.get("GEAK_AGENT_PROVIDER", "claude")
+    provider = raw_provider.strip().lower()
+    if provider not in _GEAK_AGENT_PROVIDERS:
+        choices = "|".join(sorted(_GEAK_AGENT_PROVIDERS))
+        print(
+            f"ERROR: invalid GEAK_AGENT_PROVIDER={raw_provider!r}; expected {choices}",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    os.environ["GEAK_AGENT_PROVIDER"] = provider
+    if provider != "codex":
+        return
+    if _geak_env_flag("GEAK_CODEX_NETWORK_ACCESS") and not _geak_env_flag("GEAK_CODEX_EXTERNAL_SANDBOX"):
+        print(
+            "ERROR: GEAK_CODEX_NETWORK_ACCESS requires "
+            "GEAK_CODEX_EXTERNAL_SANDBOX=1 and an isolated worker with restricted egress.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    if args is not None and bool(getattr(args, "no_kernel", False)):
+        print("Preflight: GEAK_AGENT_PROVIDER=codex configured; tool check skipped (--no-kernel)")
+        return
+    if os.environ.get("KERNEL_OPT_BACKEND_ORDER", "").strip().lower() == "forge":
+        print("Preflight: GEAK_AGENT_PROVIDER=codex configured; tool check skipped (forge owns KERNEL)")
+        return
+
+    node_request = os.environ.get("GEAK_NODE_BIN", "").strip() or "node"
+    node_bin = shutil.which(node_request)
+    if not node_bin:
+        print(
+            "ERROR: GEAK Codex mode requires Node.js 18+; "
+            f"could not find {node_request!r}. Install Node.js or set GEAK_NODE_BIN.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    try:
+        node_probe = subprocess.run([node_bin, "--version"], capture_output=True, text=True, timeout=10, check=False)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        print(f"ERROR: could not run GEAK Node.js binary {node_bin}: {exc}", file=sys.stderr)
+        sys.exit(2)
+    version_text = (node_probe.stdout or node_probe.stderr or "").strip()
+    version_match = re.fullmatch(r"v?(\d+)(?:\..*)?", version_text)
+    if node_probe.returncode != 0 or version_match is None or int(version_match.group(1)) < 18:
+        print(
+            f"ERROR: GEAK Codex mode requires Node.js 18+; {node_bin} reported "
+            f"{version_text or 'an unreadable version'}.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
+    codex_request = os.environ.get("GEAK_CODEX_BIN", "").strip() or "codex"
+    codex_bin = shutil.which(codex_request)
+    if not codex_bin:
+        print(
+            "ERROR: GEAK Codex mode requires the Codex CLI. Install Codex, run `codex login`, or set GEAK_CODEX_BIN.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    try:
+        help_probe = subprocess.run(
+            [codex_bin, "exec", "--help"], capture_output=True, text=True, timeout=30, check=False
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        print(f"ERROR: could not probe Codex CLI {codex_bin}: {exc}", file=sys.stderr)
+        sys.exit(2)
+    help_text = f"{help_probe.stdout}\n{help_probe.stderr}"
+    missing_flags = [flag for flag in _GEAK_CODEX_REQUIRED_EXEC_FLAGS if flag not in help_text]
+    if help_probe.returncode != 0 or missing_flags:
+        print(
+            "ERROR: Codex CLI is too old or incompatible with GEAK; missing exec flags: "
+            f"{', '.join(missing_flags) or '(help command failed)'}. Update Codex.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
+    auth_env = dict(os.environ)
+    for name in tuple(auth_env):
+        upper_name = name.upper()
+        if (
+            upper_name in _GEAK_CODEX_API_AUTH_ENV_NAMES
+            or _GEAK_CODEX_API_AUTH_ENV_RE.fullmatch(upper_name) is not None
+        ):
+            auth_env.pop(name, None)
+    try:
+        login_probe = subprocess.run(
+            [codex_bin, "login", "status"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+            env=auth_env,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        print(f"ERROR: could not check Codex ChatGPT login: {exc}", file=sys.stderr)
+        sys.exit(2)
+    login_text = f"{login_probe.stdout}\n{login_probe.stderr}".strip()
+    if login_probe.returncode != 0 or _GEAK_CODEX_CHATGPT_LOGIN_RE.search(login_text) is None:
+        print(
+            "ERROR: GEAK Codex mode requires ChatGPT subscription authentication in "
+            "this execution environment. Run `codex login` and choose ChatGPT, then "
+            "retry. OPENAI_API_KEY is not used for this GEAK mode.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
+    os.environ["GEAK_NODE_BIN"] = node_bin
+    os.environ["GEAK_CODEX_BIN"] = codex_bin
+    profile = os.environ.get("CODEX_HOME", "").strip() or "~/.codex"
+    print(f"Preflight: GEAK Codex runtime OK (node={version_text}, auth=ChatGPT, CODEX_HOME={profile})")
+
 
 def _tracelens_required_at_preflight(no_kernel: bool, enable_roofline: bool) -> bool:
     """Return whether the TraceLens CLI must be present at preflight (hard-fail).
@@ -1937,6 +2115,10 @@ def _preflight(
 
     # Fail fast on missing credentials after the fallback loaders.
     _validate_credentials()
+    # GEAK's provider is independent of the orchestration provider. In Codex
+    # mode, verify the user's ChatGPT-authenticated CLI before any expensive
+    # dependency or GPU setup begins.
+    _validate_geak_agent_provider(args)
 
     # Same timing, same reason: run after the loaders so a withdrawn KB
     # override set in ``.env`` is caught, and before any KB read happens.

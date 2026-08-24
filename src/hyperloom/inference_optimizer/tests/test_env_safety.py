@@ -71,6 +71,9 @@ def test_common_env_safety_filters_dotenv_and_kernel_agent_keys_only():
     # loader must read them back instead of dropping them as unsupported.
     assert common_env_safety.is_allowed_dotenv_key("ANTHROPIC_CUSTOM_HEADERS")
     assert common_env_safety.is_allowed_dotenv_key("OPENAI_CUSTOM_HEADERS")
+    assert common_env_safety.is_allowed_dotenv_key("CODEX_HOME")
+    assert common_env_safety.is_allowed_dotenv_key("GEAK_AGENT_PROVIDER")
+    assert common_env_safety.is_allowed_dotenv_key("GEAK_CODEX_SANDBOX")
     assert not common_env_safety.is_allowed_dotenv_key("PYTHONPATH")
     assert not common_env_safety.is_allowed_dotenv_key("BAD-NAME")
 
@@ -85,6 +88,25 @@ def test_common_env_safety_filters_dotenv_and_kernel_agent_keys_only():
     # Dropped keys never reach the kernel-agent child, so an opt-in route switch
     # is inert until it is listed here.
     assert common_env_safety.is_allowed_kernel_agent_env_key("HYPERLOOM_FORGE_REWRITE_BY_FLYDSL")
+    for geak_codex_key in (
+        "CODEX_HOME",
+        "GEAK_AGENT_PROVIDER",
+        "GEAK_NODE_BIN",
+        "GEAK_CODEX_BIN",
+        "GEAK_CODEX_MODEL",
+        "GEAK_CODEX_NETWORK_ACCESS",
+        "GEAK_CODEX_EFFORT",
+        "GEAK_CODEX_MAX_CONCURRENCY",
+        "GEAK_CODEX_AGENT_TIMEOUT_S",
+        "GEAK_CODEX_MAX_OUTPUT_BYTES",
+        "GEAK_CODEX_MAX_WORKFLOW_DEPTH",
+        "GEAK_CODEX_KILL_GRACE_MS",
+        "GEAK_CODEX_SANDBOX",
+        "GEAK_CODEX_ADD_DIRS",
+        "GEAK_CODEX_BYPASS_SANDBOX",
+        "GEAK_CODEX_EXTERNAL_SANDBOX",
+    ):
+        assert common_env_safety.is_allowed_kernel_agent_env_key(geak_codex_key)
     assert not common_env_safety.is_allowed_kernel_agent_env_key("TRACELENS_TOKEN")
 
     allowed, dropped = common_env_safety.filter_untrusted_env_mapping(

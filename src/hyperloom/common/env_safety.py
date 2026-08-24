@@ -108,6 +108,10 @@ DOTENV_EXACT_ALLOWLIST: frozenset[str] = frozenset(
         "ANTHROPIC_CUSTOM_HEADERS",
         "CLAUDE_CODE_OAUTH_TOKEN",
         "CLAUDE_MODEL",
+        # Optional operator override for the normal Codex profile location.
+        # Hyperloom never invents a private home for GEAK; when this is absent
+        # the CLI keeps its native ~/.codex default.
+        "CODEX_HOME",
         "CODEX_MODEL",
         # Retired provider variables, still readable so a pre-migration .env can
         # be normalized by hyperloom.common.llm_config.deepseek_compat_env.
@@ -173,15 +177,31 @@ KERNEL_AGENT_ENV_EXACT_ALLOWLIST: frozenset[str] = frozenset(
         # credential on the way back in.
         "ANTHROPIC_CUSTOM_HEADERS",
         "CLAUDE_CODE_OAUTH_TOKEN",
+        "CODEX_HOME",
         "FORGE_PATH",
+        "GEAK_AGENT_PROVIDER",
         "GEAK_CLAUDE_BIN",
         "GEAK_CLAUDE_MODEL",
+        "GEAK_CODEX_ADD_DIRS",
+        "GEAK_CODEX_AGENT_TIMEOUT_S",
+        "GEAK_CODEX_BIN",
+        "GEAK_CODEX_BYPASS_SANDBOX",
+        "GEAK_CODEX_EFFORT",
+        "GEAK_CODEX_EXTERNAL_SANDBOX",
+        "GEAK_CODEX_KILL_GRACE_MS",
+        "GEAK_CODEX_MAX_CONCURRENCY",
+        "GEAK_CODEX_MAX_OUTPUT_BYTES",
+        "GEAK_CODEX_MAX_WORKFLOW_DEPTH",
+        "GEAK_CODEX_MODEL",
+        "GEAK_CODEX_NETWORK_ACCESS",
+        "GEAK_CODEX_SANDBOX",
         "GEAK_E2E_RUNNER",
         "GEAK_MAX_BENCHMARK_SHAPES",
         "GEAK_ROOT",
         "GEAK_RUN_MODE",
         "GEAK_SCORE_TARGET",
         "GEAK_SKIP_PROFILE",
+        "GEAK_NODE_BIN",
         "HYPERLOOM_FORGE_REWRITE_BY_FLYDSL",
         "HYPERLOOM_KERNEL_AGENT_ROOT",
         "HYPERLOOM_ROOT",
