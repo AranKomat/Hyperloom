@@ -323,11 +323,13 @@ fi
 # KERNEL_OPT_BACKEND_ORDER=geak. It owns the GEAK_* handle; operators override
 # repo/ref/root with GEAK_REPO / GEAK_REF / GEAK_ROOT. NOTE: only Hyperloom's
 # internal naming changed — no upstream GEAK branch was renamed.
-GEAK_REPO="${GEAK_REPO:-https://github.com/AMD-AGI/GEAK.git}"
-GEAK_REF="${GEAK_REF:-main}"
-# GEAK_REF defaults to a branch (`main`), so resolving it to a SHA hits the
-# network (git ls-remote). Only do that when GEAK_ROOT was not overridden -- an
-# operator-pinned root must not pay for (or fail on) a network round-trip.
+# Collaborator build: pin the matching public GEAK Codex runtime so cloning
+# this Hyperloom branch is sufficient. Operators can still override both.
+GEAK_REPO="${GEAK_REPO:-https://github.com/AranKomat/GEAK.git}"
+GEAK_REF="${GEAK_REF:-83f2eaf5eecebc2a0c003b62324a861f49a236b1}"
+# A branch ref requires a network lookup to resolve its cache directory; the
+# collaborator default is already a SHA. Only resolve when GEAK_ROOT was not
+# overridden—an operator-pinned root must not pay for (or fail on) a lookup.
 if [ -z "${GEAK_ROOT:-}" ]; then
   _GEAK_SHA="$(_resolve_ref_sha "$GEAK_REPO" "$GEAK_REF")"
   GEAK_ROOT="${_open_source_root}/GEAK@${_GEAK_SHA}"
