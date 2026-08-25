@@ -1168,6 +1168,7 @@ class KernelPhase(PhaseHandler):
 
         try:
             proc = await asyncio.to_thread(_run)
+            stdout_tail = (proc.stdout or "")[-4000:]
             stderr_tail = (proc.stderr or "")[-2000:]
             if proc.returncode != 0:
                 log.warning("GEAK runner rc=%s: %s", proc.returncode, stderr_tail)
@@ -1214,6 +1215,7 @@ class KernelPhase(PhaseHandler):
                     "status": "error",
                     "error_class": "no_result_json",
                     "error": (f"runner rc={proc.returncode} produced no parseable result.json at {result_path}"),
+                    "stdout_tail": stdout_tail,
                     "stderr_tail": stderr_tail,
                 }
             )

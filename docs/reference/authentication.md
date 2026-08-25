@@ -218,9 +218,13 @@ for subscription sign-in and headless device authentication.
 GEAK deliberately reuses the normal Codex profile: an explicitly exported
 `CODEX_HOME`, or the CLI default `~/.codex`. Hyperloom does not create a
 run-private home for this provider and does not copy credentials into `.env`.
-For Docker or remote Ray execution, mount that existing profile at the same
-path and pass `CODEX_HOME` when non-default. Treat any profile `auth.json` as a
-password: never add it to the repository, an image layer, logs, or run output.
+For Docker or remote Ray execution, Codex needs a writable `CODEX_HOME`; a
+read-only profile bind is insufficient because `codex exec` creates runtime
+state even with `--ephemeral`. Prefer mounting the source profile read-only,
+copying only `auth.json` into a private mode-`0700` runtime directory, and
+setting `CODEX_HOME` to that writable directory. Remove it with the worker.
+Treat any profile `auth.json` as a password: never add it to the repository, an
+image layer, logs, or run output.
 If Codex commands need network access, use only a dedicated externally isolated
 worker with egress restricted to loopback/required destinations, no unrelated
 secrets or mounts, and a short-lived ChatGPT login. Workspace-write alone does

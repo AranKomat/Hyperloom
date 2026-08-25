@@ -192,5 +192,31 @@ def test_sigkill_escalation_when_child_ignores_sigterm(tmp_path, monkeypatch):
     assert not (tmp_path / "out" / "result.json").is_file()
 
 
+def test_cli_surfaces_nested_geak_failure_diagnostics(tmp_path, monkeypatch, capsys):
+    """The Hyperloom parent must retain the useful nested failure details."""
+    handoff_path = tmp_path / "handoff.json"
+    handoff_path.write_text(json.dumps(_handoff()), encoding="utf-8")
+
+    monkeypatch.setattr(
+        psr,
+        "call_geak",
+        lambda *_args, **_kwargs: {
+            "status": "error",
+            "error": "nested launch failed",
+            "returncode": 7,
+            "stdout_tail": "nested stdout",
+            "stderr_tail": "nested stderr",
+            "result_path": str(tmp_path / "result.json"),
+        },
+    )
+
+    assert psr._main([str(handoff_path), str(tmp_path / "out")]) == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["error"] == "nested launch failed"
+    assert payload["returncode"] == 7
+    assert payload["stdout_tail"] == "nested stdout"
+    assert payload["stderr_tail"] == "nested stderr"
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-v"]))

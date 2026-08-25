@@ -177,6 +177,10 @@ def _main(argv: list[str]) -> int:
             {
                 "status": out.get("status"),
                 "speedup": out.get("throughput_speedup"),
+                "error": out.get("error"),
+                "returncode": out.get("returncode"),
+                "stdout_tail": out.get("stdout_tail"),
+                "stderr_tail": out.get("stderr_tail"),
                 "result_path": out.get("result_path"),
             }
         )

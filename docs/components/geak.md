@@ -67,12 +67,14 @@ official [Codex authentication guide](https://learn.chatgpt.com/docs/auth) for
 subscription and headless-device login options.
 
 When Hyperloom runs in Docker or on a remote Ray worker, the login must be
-available in that actual execution environment. Mount the existing Codex
-profile at the same path and pass `CODEX_HOME` when it is non-default; never
-copy `auth.json` into the repository, an image layer, `.env`, or an experiment
-artifact. Bind only the scoped profile directory — never filesystem root, the
-whole home/temp directory, or the Hyperloom workspace. `codex login status`
-must succeed inside the container/worker before the GEAK phase starts.
+available in that actual execution environment. `codex exec` needs a writable
+`CODEX_HOME` even in ephemeral mode, so do not point it at a read-only bind.
+Prefer a read-only source-profile mount, copy only `auth.json` into a private
+mode-`0700` runtime directory, and set `CODEX_HOME` to that writable directory.
+Never copy `auth.json` into the repository, an image layer, `.env`, or an
+experiment artifact. Bind only the scoped profile directory — never filesystem
+root, the whole home/temp directory, or the Hyperloom workspace. `codex login
+status` must succeed inside the container/worker before the GEAK phase starts.
 
 The installer and runtime forward the non-secret `GEAK_NODE_BIN` and
 `GEAK_CODEX_*` controls documented in the
