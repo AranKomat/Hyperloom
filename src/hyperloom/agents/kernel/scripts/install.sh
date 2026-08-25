@@ -326,7 +326,7 @@ fi
 # Collaborator build: pin the matching public GEAK Codex runtime so cloning
 # this Hyperloom branch is sufficient. Operators can still override both.
 GEAK_REPO="${GEAK_REPO:-https://github.com/AranKomat/GEAK.git}"
-GEAK_REF="${GEAK_REF:-b824b4a0cfc3039f48a023300f0daea30b6dcf70}"
+GEAK_REF="${GEAK_REF:-c9ee32d4e5638103a9f2c4e94b872d9f68e590e2}"
 # A branch ref requires a network lookup to resolve its cache directory; the
 # collaborator default is already a SHA. Only resolve when GEAK_ROOT was not
 # overridden—an operator-pinned root must not pay for (or fail on) a lookup.
