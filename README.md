@@ -6,6 +6,15 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](pyproject.toml)
 
+> [!IMPORTANT]
+> This experimental collaborator branch is based on the latest AMD Hyperloom
+> `main` and pins the matching
+> [GEAK Codex runtime](https://github.com/AranKomat/GEAK/tree/codex-workflow-runtime-v2),
+> so it can be cloned and installed directly. Run `codex login`, verify that
+> `codex login status` reports `Logged in using ChatGPT`, and set
+> `GEAK_AGENT_PROVIDER=codex`. Claude remains the default when that variable is
+> not set. See [GEAK authentication](docs/reference/authentication.md#geak-with-a-chatgpt-subscription).
+
 ROCm™ Hyperloom is an autonomous agentic system designed to optimize end-to-end inference workloads
 (targeting both host code and GPU kernels) on AMD GPUs. Using advanced AI agents and profiling tools,
 Hyperloom analyzes your workload, identifies performance bottlenecks, implements targeted optimizations,
