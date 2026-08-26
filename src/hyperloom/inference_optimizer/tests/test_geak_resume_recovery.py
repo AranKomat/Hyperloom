@@ -203,6 +203,7 @@ async def test_geak_handoff_preserves_serving_fidelity_knobs_and_output_metric(
         osl=1024,
         conc=64,
         max_model_len=2248,
+        target_summary="Prioritize the measured GEMM heads.",
     )
     coord.phase_kernel._record_geak_kernel_journey = lambda _result: None
 
@@ -226,3 +227,4 @@ async def test_geak_handoff_preserves_serving_fidelity_knobs_and_output_metric(
     assert handoff["accepted_flags"] == "--no-enable-prefix-caching"
     assert handoff["raw_baseline_tput"] == 100.0
     assert handoff["e2e_metric"] == "output"
+    assert handoff["target_summary"] == "Prioritize the measured GEMM heads."

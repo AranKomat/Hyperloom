@@ -785,6 +785,11 @@ class KernelPhase(PhaseHandler):
             "bench_client": "auto",
             "e2e_metric": "output",
             "inferencex_path": str(os.environ.get("INFERENCEX_PATH", "")),
+            # GEAK maps this onto its existing ``task`` channel so the operator's
+            # measured target and stop rules reach the kernel agents.  It is
+            # advisory only; GEAK's profiling, parity, and e2e gates remain
+            # authoritative.
+            "target_summary": str(getattr(state, "target_summary", "") or ""),
             # Pin the serving GPU set: explicit visibility mask, else 0..tp-1.
             "gpu_ids": (
                 os.environ.get("HIP_VISIBLE_DEVICES")
